@@ -1,6 +1,5 @@
-langchain
-deepagents
-langchain-google-genai
-python-dotenv
-fpdf2
 streamlit
+requests
+pandas
+matplotlib
+fpdf2
