@@ -1,5 +1,6 @@
 import requests
 from fpdf import FPDF
+from datetime import datetime
 
 def get_coords(city):
     url = "https://geocoding-api.open-meteo.com/v1/search"
@@ -15,63 +16,199 @@ def predict_storm_dict(city):
     if not coords:
         return None
     lat, lon, name = coords
-
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
         "longitude": lon,
-        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day",
-        "hourly": "temperature_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,visibility",
+        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day,cloud_cover,snowfall",
+        "hourly": "temperature_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,visibility,weather_code",
         "daily": "temperature_2m_max,temperature_2m_min,uv_index_max,precipitation_probability_max",
         "timezone": "auto",
         "forecast_days": 7
     }
     r = requests.get(url, params=params)
     data = r.json()
-
     current = data["current"]
     hourly = data["hourly"]
     daily = data["daily"]
-
     idx = 0
     for i, t in enumerate(hourly["time"]):
         if t[:13] == current["time"][:13]:
             idx = i
             break
-
     next_rain = hourly["precipitation_probability"][idx:idx+6]
     next_wind = hourly["wind_speed_10m"][idx:idx+6]
     next_gust = hourly["wind_gusts_10m"][idx:idx+6]
     next_precip = hourly["precipitation"][idx:idx+6]
-
     max_rain = max([x for x in next_rain if x is not None], default=0)
     max_wind = max(next_wind)
     max_gust = max(next_gust)
     total_precip = sum([x for x in next_precip if x is not None])
-
     if max_gust > 55 or (max_wind > 40 and max_rain > 70):
-        level, msg, color = "STORM ALERT", "Severe thunderstorm expected.", "red"
+        level, msg, color = "STORM ALERT", "Severe thunderstorm expected. Take precautions and secure outdoor items.", "red"
     elif total_precip > 2 or max_rain > 70:
-        level, msg, color = "MODERATE ALERT", "Heavy rain expected.", "orange"
+        level, msg, color = "MODERATE ALERT", "Heavy rain expected in next few hours.", "orange"
     elif max_rain > 40:
         level, msg, color = "LIGHT RAIN", "Light rain possible.", "orange"
     else:
-        level, msg, color = "NO STORM - SAFE", "Weather is normal.", "green"
-
+        level, msg, color = "NO STORM - SAFE", "Weather is normal. No storm risk.", "green"
     return {
         "name": name, "current": current, "hourly": hourly, "daily": daily,
         "level": level, "msg": msg, "color": color,
         "max_rain_chance": int(max_rain), "max_wind": float(max_wind)
     }
 
-def create_pdf(city, live_text, pred_text):
+def safe(txt):
+    return str(txt).encode("latin-1", "ignore").decode("latin-1")
+
+# YE FUNCTION AB DONO TARAH SE CHALEGA:
+# 1. create_pdf(pred) -> Naya wala
+# 2. create_pdf(city, live_text, pred_text) -> Purana wala
+def create_pdf(pred, live_text=None, pred_text=None):
+    # Agar purana tarika use hua: create_pdf("Lahore", "Temp...", "NO STORM...")
+    if isinstance(pred, str):
+        city = pred
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        pdf.set_fill_color(2, 132, 199)
+        pdf.rect(0, 0, 210, 38, "F")
+        pdf.set_y(8)
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 10, safe("WEATHER ANALYSIS & STORM PREDICTION"), align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 6, safe("Live Weather Report"), align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(8)
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 9, safe(f"Weather Report - {city}"), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(0, 8, safe(live_text or ""))
+        pdf.ln(2)
+        pdf.multi_cell(0, 8, safe(pred_text or ""))
+        return bytes(pdf.output())
+
+    # Naya tarika: create_pdf(pred dict)
+    c = pred["current"]
+    h = pred["hourly"]
+    d = pred["daily"]
+    city = pred["name"]
+    now = datetime.now().strftime("%d %B %Y, %I:%M %p")
     pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"Weather Report - {city}", ln=True)
-    pdf.set_font("Arial", "", 12)
-    pdf.multi_cell(0, 10, live_text)
-    pdf.multi_cell(0, 10, pred_text)
-    filename = f"{city}_report.pdf"
-    pdf.output(filename)
-    return filename
+    pdf.set_fill_color(2, 132, 199)
+    pdf.rect(0, 0, 210, 38, "F")
+    pdf.set_y(8)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 10, safe("WEATHER ANALYSIS & STORM PREDICTION"), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, safe("Live Weather Report  |  Generated by Storm Prediction Agent"), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 9, safe(f"Weather Report - {city}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(0, 6, safe(f"Report Date: {now}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, safe(f"Location: {city}  |  Source: Open-Meteo Live Data"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    if pred["color"] == "red":
+        pdf.set_fill_color(254, 226, 226)
+        pdf.set_text_color(153, 27, 27)
+        alert_head = "STORM ALERT - DANGER"
+    elif pred["color"] == "orange":
+        pdf.set_fill_color(254, 243, 199)
+        pdf.set_text_color(146, 64, 14)
+        alert_head = "MODERATE ALERT - CAUTION"
+    else:
+        pdf.set_fill_color(220, 252, 231)
+        pdf.set_text_color(22, 101, 52)
+        alert_head = "NO STORM - SAFE"
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, safe(f"  {alert_head}"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(15, 23, 42)
+    pdf.multi_cell(0, 7, safe(f"  {pred['msg']}  Max Wind: {pred['max_wind']} km/h  |  Rain Chance: {pred['max_rain_chance']}%  (Next 6 Hours)"))
+    pdf.ln(4)
+    pdf.set_fill_color(2, 132, 199)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 9, safe("  Current Weather Conditions"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_font("Helvetica", "", 11)
+    uv_val = d["uv_index_max"][0] if "uv_index_max" in d else 0
+    vis_km = round((h.get("visibility", [3200])[0] or 3200) / 1000, 1)
+    rows = [
+        ("Temperature", f"{c['temperature_2m']} C"),
+        ("Feels Like", f"{c['apparent_temperature']} C"),
+        ("Humidity", f"{c['relative_humidity_2m']} %"),
+        ("Wind Speed", f"{c['wind_speed_10m']} km/h"),
+        ("Wind Gusts", f"{c['wind_gusts_10m']} km/h"),
+        ("Wind Direction", f"{c.get('wind_direction_10m', 0)} degrees"),
+        ("Pressure", f"{c['pressure_msl']} hPa"),
+        ("Precipitation", f"{c.get('precipitation', 0)} mm"),
+        ("Cloud Cover", f"{c.get('cloud_cover', 0)} %"),
+        ("UV Index", f"{uv_val}"),
+        ("Visibility", f"{vis_km} km"),
+        ("Min / Max Today", f"{d['temperature_2m_min'][0]} C  /  {d['temperature_2m_max'][0]} C"),
+    ]
+    for i, (k, v) in enumerate(rows):
+        if i % 2 == 0:
+            pdf.set_fill_color(241, 245, 249)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+        pdf.cell(95, 8, safe(f"  {k}"), fill=True, border=0)
+        pdf.cell(0, 8, safe(f"  {v}"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    pdf.set_fill_color(2, 132, 199)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 9, safe("  7-Day Forecast"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_fill_color(226, 232, 240)
+    pdf.cell(45, 8, safe("  Day"), fill=True)
+    pdf.cell(45, 8, safe("  Min Temp"), fill=True)
+    pdf.cell(45, 8, safe("  Max Temp"), fill=True)
+    pdf.cell(0, 8, safe("  UV Index"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    for i in range(7):
+        try:
+            day = datetime.fromisoformat(str(d["time"][i])[:10]).strftime("%a, %d %b")
+        except:
+            day = f"Day {i+1}"
+        if i % 2 == 0:
+            pdf.set_fill_color(241, 245, 249)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+        pdf.cell(45, 8, safe(f"  {day}"), fill=True)
+        pdf.cell(45, 8, safe(f"  {d['temperature_2m_min'][i]} C"), fill=True)
+        pdf.cell(45, 8, safe(f"  {d['temperature_2m_max'][i]} C"), fill=True)
+        uvv = d.get("uv_index_max", [0]*7)[i] if i < len(d.get("uv_index_max", [])) else 0
+        pdf.cell(0, 8, safe(f"  {uvv}"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    pdf.set_fill_color(2, 132, 199)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 9, safe("  Advisory & Recommendation"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_font("Helvetica", "", 10)
+    if pred["color"] == "red":
+        advice = "Thunderstorm nearby. Stay indoors, avoid travelling, stay away from electric poles and secure outdoor items."
+    elif pred["color"] == "orange":
+        advice = "Rain is expected. Carry an umbrella, avoid unnecessary travel and drive carefully."
+    else:
+        advice = "Weather is safe. You can continue normal outdoor activities. Stay hydrated and enjoy your day."
+    pdf.multi_cell(0, 7, safe(advice))
+    pdf.ln(6)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(0, 5, safe("This is an auto-generated report based on live Open-Meteo data. For emergency, follow local authority instructions."), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5, safe("Storm Prediction Agent - Weather Analysis System"), align="C", new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
